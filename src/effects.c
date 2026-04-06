@@ -8368,6 +8368,49 @@ int effects_cv_map(int effect_id, const char *control_symbol, const char *source
         source_is_mod_cv = source_has_ranges = true;
         source_min_value = 0.0f;
         source_max_value = 10.0f;
+    } else if (!strncmp(source_port_name, "effect_", 7)) {
+        // Internal effect CV ports have enough info in mod-host itself.
+        // Avoid JACK metadata lookup on these ports, as some JACK builds can
+        // fail in jack_get_property() during pedalboard restore.
+        char effect_str[6];
+        const char *source_symbol = NULL;
+        int source_effect_id = -1;
+
+        mod_memset(effect_str, 0, sizeof(effect_str));
+        strncpy(effect_str, source_port_name+7, 5);
+
+        for (int i=1; i<6; ++i) {
+            if (effect_str[i] == '\0')
+                break;
+            if (effect_str[i] == ':') {
+                effect_str[i] = '\0';
+                source_symbol = source_port_name + (8 + i);
+                source_effect_id = atoi(effect_str);
+                break;
+            }
+        }
+
+        if (source_symbol != NULL && InstanceExist(source_effect_id)) {
+            const effect_t *source_effect = &g_effects[source_effect_id];
+
+            for (uint32_t i = 0; i < source_effect->output_cv_ports_count; ++i)
+            {
+                if (!strcmp(source_effect->output_cv_ports[i]->symbol, source_symbol))
+                {
+                    const port_t *source_port = source_effect->output_cv_ports[i];
+
+                    source_min_value = source_port->min_value;
+                    source_max_value = source_port->max_value;
+
+                    if (source_port->hints & HINT_CV_MOD)
+                        source_is_mod_cv = true;
+                    if (source_port->hints & HINT_CV_RANGES)
+                        source_has_ranges = true;
+
+                    break;
+                }
+            }
+        }
     } else {
         const jack_uuid_t uuid = jack_port_uuid(source_jack_port);
         if (!jack_uuid_empty(uuid)) {
@@ -8383,50 +8426,6 @@ int effects_cv_map(int effect_id, const char *control_symbol, const char *source
                 source_max_value = atof(value_max);
 
                 // TODO set and fetch mod-type port here
-
-            // find values when client is from mod-host, as fallback
-            }
-            else if (!strncmp(source_port_name, "effect_", 7))
-            {
-                char effect_str[6];
-                const char *source_symbol = NULL;
-                int source_effect_id = -1;
-
-                mod_memset(effect_str, 0, sizeof(effect_str));
-                strncpy(effect_str, source_port_name+7, 5);
-
-                for (int i=1; i<6; ++i) {
-                    if (effect_str[i] == '\0')
-                        break;
-                    if (effect_str[i] == ':') {
-                        effect_str[i] = '\0';
-                        source_symbol = source_port_name + (8 + i);
-                        source_effect_id = atoi(effect_str);
-                        break;
-                    }
-                }
-
-                if (source_symbol != NULL && InstanceExist(source_effect_id)) {
-                    const effect_t *source_effect = &g_effects[source_effect_id];
-
-                    for (uint32_t i = 0; i < source_effect->output_cv_ports_count; ++i)
-                    {
-                        if (!strcmp(source_effect->output_cv_ports[i]->symbol, source_symbol))
-                        {
-                            const port_t *source_port = source_effect->output_cv_ports[i];
-
-                            source_min_value = source_port->min_value;
-                            source_max_value = source_port->max_value;
-
-                            if (source_port->hints & HINT_CV_MOD)
-                                source_is_mod_cv = true;
-                            if (source_port->hints & HINT_CV_RANGES)
-                                source_has_ranges = true;
-
-                            break;
-                        }
-                    }
-                }
             }
 
             if (value_min != NULL)
